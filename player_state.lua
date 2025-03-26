@@ -5,8 +5,8 @@
     Author: Sonson
 
     Changelog:
-
-
+    - v1.0.0:
+        - Initial Release
 ]]
 ---@class PlayerState
 ---@field config PlayerStateConfig
@@ -58,7 +58,7 @@ function PlayerState.new(config)
     self.location = ""
     self.coords = {x = 0, y = 0, z = 0}
     --buffs
-    --TODO: figure out something to do with buffs and debuffs?
+    --TODO: figure out something to do with buffs and debuffs or delegate it to new BuffManager class
     self.buffs = {}
     self.debuffs = {}
     --animations
@@ -106,7 +106,7 @@ function PlayerState:_updatePlayerState()
     local prayer = API.GetPray_() or 0
     self.prayer = {current = prayer, max = maxPrayer, percent = math.floor((prayer / maxPrayer) * 100)}
     --adrenaline
-    local adrenData = API.VB_FindPSettinOrder(679)
+    local adrenData = API.VB_FindPSettinOrder(679) -- adrenaline vb
     self.adrenaline = adrenData and adrenData.state / 10 or 0
     --location
     self.location = self:_checkLocation()
