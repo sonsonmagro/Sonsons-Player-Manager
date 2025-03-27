@@ -14,7 +14,7 @@
         - NEW: Health Management feature:
         - The script will now attempt to handle everything related to the player's health.
 
-        - Will auto-detect MOST edible food in your inventory and segment them based on type ("food", "potion", "jellyfish")\
+        - Will auto-detect MOST edible food in your inventory and segment them based on type ("food", "potion", "jellyfish")
         - You can reference these at anytime from `self.foodStuffs`
             - Thresholds can be set in config: config.thresholds.healthThreshold
                 - Set the threshold type ("percent" or "current") and the value
