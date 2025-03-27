@@ -1,6 +1,6 @@
 # [v1.1.1] Sonson's Player Manager
 
-A comprehensive player state and management utility providing advanced tracking, health management, and dynamic location detection.
+A comprehensive player state and management utility providing advanced tracking, health management, prayer management and dynamic location detection.
 
 ## Features
 
