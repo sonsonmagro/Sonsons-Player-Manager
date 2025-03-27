@@ -522,11 +522,11 @@ function PlayerManager:_manageHealth()
     -- get the foodstuffs
     self:_getEdibleItems()
     local potions, jellyfish, food = self:_filterFoodstuffs("Potion"), self:_filterFoodstuffs("Jellyfish"), self:_filterFoodstuffs("Food")
-    
+
     -- check thresholds
     -- excalibur thresh
     local excalThresholdType, excalThresholdValue = self.config.thresholds.healthThreshold.excalThresholdType, self.config.thresholds.healthThreshold.excalThreshold
-    local excalThreshold = (excalThresholdType == "percent" and excalThresholdValue >= self.state.health.percent) or (excalThresholdType == "current" and value >= self.state.health.current)
+    local excalThreshold = (excalThresholdType == "percent" and excalThresholdValue >= self.state.health.percent) or (excalThresholdType == "current" and excalThresholdValue >= self.state.health.current)
     -- general trhesh
     local valueType, value = self.config.thresholds.healthThreshold.valueType, self.config.thresholds.healthThreshold.value
     local threshold = (valueType == "percent" and value >= self.state.health.percent) or (valueType == "current" and value >= self.state.health.current)
