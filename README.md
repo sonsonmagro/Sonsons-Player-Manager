@@ -94,8 +94,8 @@ local config = {
         healthThreshold = {
             valueType = "percent",
             value = 50,           -- Trigger at 50% health
-            criticalValueType = "percent",
-            criticalValue = 25,   -- Critical threshold at 25%
+            criticalValueType = "current",
+            criticalValue = 2000,   -- Critical threshold at 2000 LP
             excalThresholdType = "percent",
             excalThreshold = 75   -- Use Excalibur at 75% health
         }
