@@ -69,7 +69,7 @@ Save `player_manager.lua` in your `Lua_Scripts` folder.
 
 ### Import and Configuration
 ```lua
-local PlayerManager = require("player_state")
+local PlayerManager = require("player_manager")
 
 -- Define configuration
 local config = {
