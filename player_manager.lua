@@ -1,50 +1,10 @@
----@version 1.1.0
+---@version 1.1.1
 --[[
     File: player_manager.lua
     Description: Manage your player's state from one dynamic instance
     Author: Sonson
 
-    Changelog:
-    - v1.1.0: Rebranded to Sonson's Player Manager
-        - Added methods to add dynamic and static locations (im sure they'll be useful later)
-
-        - Changed config to include more settings
-            - An example config can be found below
-
-        - NEW: Health Management feature:
-        - The script will now attempt to handle everything related to the player's health.
-
-        - Will auto-detect MOST edible food in your inventory and segment them based on type ("food", "potion", "jellyfish")
-        - You can reference these at anytime from `self.foodStuffs`
-            - Thresholds can be set in config: config.thresholds.healthThreshold
-                - Set the threshold type ("percent" or "current") and the value
-                    - If the player's heath drops below this threshold it will one-tick eat
-                        - Consume sara brew or guthix rest as well as a jellyfish in the same tick
-                            - This is to prevent adrenaline drain
-                            - Will only drink brews/rests if no jellies are found
-                            - Will only eat jellies if no brews/rests are found
-                - Set a critical threshold type ("percent" or "current") and a critical threshold value
-                    - If the player's health drops below this value, it will attempt to eat a piece of food alongside the brews and jellies
-                        -This will drain adrenaline, but should push the player out of the critical health threshold
-                - Set a threshold type and value for when to use Enhanced Excalibur
-                    - If the player's health drops below this value, it will attempt to use the Enhanced Excalibur
-                    - It can detect if Excalibur is equipped or in your inventory
-                    - [IMPORTANT] Make sure your Excalibur settings are set to default for this to work correctly
-
-        - Health management system can be overriden through config: config.overrideHealthManagement = true
-            - Doesn't have to be a static boolean, could also be a function
-
-        - Methods like `PlayerManager:oneTickEat(eatBigFood)` and `PlayerManager:useExcalibur()` can be called from inside your main script at any time
-
-        - More tracking tables!
-            - PlayerManager:stateTracking()
-            - PlayerManager:managementTracking()
-            - PlayerManager:foodStuffsTracking()
-
-    - v1.0.0: Sonson's Player State Initial Release
-
     TODO:
-    - !! Make it a disclaimer to annnounce that excalibur needs to be configured to default behavior
     - Add methods to remove static and dynamic locations
     - Add player_manager features
         - Prayer Management
@@ -56,7 +16,8 @@
 ---@field config PlayerManagerConfig
 ---@field state PlayerState
 ---@field playerManagementState any --TODO: fix this
----@field foodStuffs FoodStuff[]
+---@field foodStuffs Stuff[]
+---@field prayerStuffs Stuff[]
 local PlayerManager = {}
 PlayerManager.__index = PlayerManager
 
@@ -118,13 +79,13 @@ PlayerManager.__index = PlayerManager
 ---@field name string
 ---@field detectionFn fun(): boolean
 
----@class FoodStuff
+---@class Stuff
 ---@field name string
 ---@field id number
----@field type foodType
+---@field type stuffType
 ---@field count number
 
----@alias foodType string
+---@alias stuffType string
 ---| "Potion"
 ---| "Jellyfish"
 ---| "Food"
@@ -197,6 +158,7 @@ function PlayerManager.new(config)
     }
 
     self.foodStuffs = {}
+    self.prayerStuffs = {}
 
     return self
 end
@@ -299,6 +261,30 @@ function PlayerManager:getDebuff(debuffId)
     return API.DeBuffbar_GetIDstatus(debuffId, false) or false
 end
 
+---sorts foods into foodstuffs table
+---@param list table
+---@param itemName string
+---@param itemId number
+---@param type stuffType
+function PlayerManager._sortStuffs(list, itemName, itemId, type)
+    -- check if item already exists in foodstuffs
+    for _, i in ipairs(list) do
+        if i.name == itemName and i.type == type then
+            i.count = i.count + 1
+            return
+        end
+    end
+    -- add it if it isn't
+    table.insert(list, {
+        name = itemName,
+        id = itemId,
+        type = type,
+        count = 1
+    })
+end
+
+--#region health management stuff
+
 ---checks if the player has enhanced excalibur in inventory or equipped
 ---@private
 ---@return {location: string, id: number} | boolean
@@ -326,7 +312,7 @@ end
 ---@return boolean
 function PlayerManager:useExcalibur()
     local currentTick = API.Get_tick()
-    
+
     --do the excal check
     local hasExcalibur = self:_hasExcalibur()
     if (not hasExcalibur or self:getDebuff(14632).found or currentTick - 1 <= self.playerManagementState.lastExcalTick) then return false end
@@ -334,84 +320,42 @@ function PlayerManager:useExcalibur()
     local location, id = hasExcalibur.location, hasExcalibur.id
 
     if location == "inventory" then
-        return API.DoAction_Inventory1(id, 0, 1, API.OFF_ACT_GeneralInterface_route) -- default behavior
+        if API.DoAction_Inventory1(id, 0, 1, API.OFF_ACT_GeneralInterface_route) then -- default behavior
+            self.playerManagementState.lastExcalTick = currentTick
+        end
     elseif location == "equipped" then
         ---@diagnostic disable-next-line
-        return API.DoAction_Interface(0xffffffff, 0x8f0b, 2, 1464, 15, 5, API.OFF_ACT_GeneralInterface_route) -- default behavior
+        if API.DoAction_Interface(0xffffffff, 0x8f0b, 2, 1464, 15, 5, API.OFF_ACT_GeneralInterface_route) then -- default behavior
+            self.playerManagementState.lastExcalTick = currentTick
+        end
     end
 
     return false
 end
 
----checks if player has elven ritual shard in inventory
----@return boolean
-function PlayerManager:_hasElvenShard()
-    return API.InvItemFound1(43358)
-end
-
----uses elven ritual shard
-function PlayerManager:useElvenShard()
-    local currentTick = API.Get_tick()
-
-    --do shard check
-    if not self:_hasElvenShard() or self:getDebuff(43358).found or currentTick <= self.playerManagementState.lastElvenShardTick then return end
-
-    if API.DoAction_Inventory1(43358, 0, 1, API.OFF_ACT_GeneralObject_route) then
-        self.playerManagementState.lastElvenShardTick = API.Get_tick()
-        return true
-    else
-        return false
-    end
-end
-
---#region health management stuff
-
----sorts foods into foodstuffs table
----@param list table
----@param itemName string
----@param itemId number
----@param type foodType
-function PlayerManager._sortFoodStuffs(list, itemName, itemId, type)
-    -- check if item already exists in foodstuffs
-    for _, i in ipairs(list) do
-        if i.name == itemName and i.type == type then
-            i.count = i.count + 1
-            return
-        end
-    end
-    -- add it if it isn't
-    table.insert(list, {
-        name = itemName,
-        id = itemId,
-        type = type,
-        count = 1
-    })
-end
-
--- TODO: make sure this isn't performance intensive (seems fine so far)
 ---checks to make sure that the player has something they can consume to regain hp in their inventory
 ---@private
----@return FoodStuff[]
+---@return Stuff[]
 function PlayerManager:_getEdibleItems()
     local potions, jellyfish, foods = {
-        "Guthix rest", "Super Guthix brew",
-        "Saradomin brew", "Super Saradomin brew"
-    },
-    {
-        "Blue blubber jellyfish", "2/3 blue blubber jellyfish", "1/3 blue blubber jellyfish",
-        "Green blubber jellyfish", "2/3 green blubber jellyfish", "1/3 green blubber jellyfish",
-    },
-    {
-        "Kebab", "Bread", "Doughnut", "Roll", "Square sandwich",
-        "Crayfish", "Shrimps", "Sardine", "Herring", "Mackerel",
-        "Anchovies", "Cooked chicken", "Cooked meat", "Trout", "Cod",
-        "Pike", "Salmon", "Tuna", "Bass", "Lobster", "Swordfish",
-        "Desert sole", "Catfish", "Monkfish", "Beltfish", "Ghostly sole",
-        "Cooked eeligator", "Shark", "Sea turtle", "Great white shark", "Cavefish",
-        "Manta ray", "Rocktail", "Tiger shark", "Sailfish", "Baron shark",
-        "Potato with cheese", "Tuna potato", "Great maki", "Great gunkan",
-        "Rocktail soup", "Sailfish soup", "Fury shark", "Primal feast"
-    }
+            "Guthix rest", "Super Guthix brew",
+            "Saradomin brew", "Super Saradomin brew"
+        },
+        {
+            "Blue blubber jellyfish", "2/3 blue blubber jellyfish", "1/3 blue blubber jellyfish",
+            "Green blubber jellyfish", "2/3 green blubber jellyfish", "1/3 green blubber jellyfish",
+        },
+        {
+            "Kebab", "Bread", "Doughnut", "Roll", "Square sandwich",
+            "Crayfish", "Shrimps", "Sardine", "Herring", "Mackerel",
+            "Anchovies", "Cooked chicken", "Cooked meat", "Trout", "Cod",
+            "Pike", "Salmon", "Tuna", "Bass", "Lobster", "Swordfish",
+            "Desert sole", "Catfish", "Monkfish", "Beltfish", "Ghostly sole",
+            "Cooked eeligator", "Shark", "Sea turtle", "Great white shark", "Cavefish",
+            "Manta ray", "Rocktail", "Tiger shark", "Sailfish", "Baron shark",
+            "Potato with cheese", "Tuna potato", "Great maki", "Great gunkan",
+            "Rocktail soup", "Sailfish soup", "Fury shark", "Primal feast"
+        }
 
     local foodStuffs = {}
     local inventoryItems = API.ReadInvArrays33()
@@ -424,21 +368,21 @@ function PlayerManager:_getEdibleItems()
             --check if its a potion
             for _, v in pairs(potions) do
                 if string.find(itemName, v) then
-                    self._sortFoodStuffs(foodStuffs, itemName, item.itemid1, "Potion")
+                    self._sortStuffs(foodStuffs, itemName, item.itemid1, "Potion")
                     goto continue
                 end
             end
             --check if its a jellyfish
             for _, v in pairs(jellyfish) do
                 if itemName == v then
-                    self._sortFoodStuffs(foodStuffs, itemName, item.itemid1, "Jellyfish")
+                    self._sortStuffs(foodStuffs, itemName, item.itemid1, "Jellyfish")
                     goto continue
                 end
             end
             --check if its a food
             for _, v in pairs(foods) do
                 if itemName == v then
-                    self._sortFoodStuffs(foodStuffs, itemName, item.itemid1, "Food")
+                    self._sortStuffs(foodStuffs, itemName, item.itemid1, "Food")
                 end
             end
             ::continue::
@@ -464,8 +408,8 @@ end
 
 ---retrieves specific type of foodstuffs
 ---@private
----@param type foodType
----@return FoodStuff[]
+---@param type stuffType
+---@return Stuff[]
 function PlayerManager:_filterFoodstuffs(type)
     local filteredFoodStuffs = {}
     for _, item in ipairs(self.foodStuffs) do
@@ -476,16 +420,17 @@ function PlayerManager:_filterFoodstuffs(type)
     return filteredFoodStuffs
 end
 
-
 ---eats first type of food found returns true if action taken
----@param type foodType
+---@param type stuffType
 ---@return boolean
 function PlayerManager:_eat(type)
     local item = self:_filterFoodstuffs(type)[1]
     if API.DoAction_Inventory1(item.id, 0, 1, API.OFF_ACT_GeneralInterface_route) then
         API.RandomSleep2(30, 10, 20)
         return true
-    else return false end
+    else
+        return false
+    end
 end
 
 ---eats all food in one tick
@@ -509,6 +454,8 @@ function PlayerManager:oneTickEat(eatBigFood)
             API.RandomSleep2(60, 10, 20)
         end
     end
+
+    if currentTick - 1 <= self.playerManagementState.lastDrinkTick then return false end
     if #self:_filterFoodstuffs("Potion") > 0 then
         if self:_eat("Potion") then
             self.playerManagementState.lastDrinkTick = currentTick
@@ -519,24 +466,144 @@ end
 
 ---manages player health
 function PlayerManager:_manageHealth()
-    -- get the foodstuffs
-    self:_getEdibleItems()
-    local potions, jellyfish, food = self:_filterFoodstuffs("Potion"), self:_filterFoodstuffs("Jellyfish"), self:_filterFoodstuffs("Food")
+    local potions, jellyfish, food = self:_filterFoodstuffs("Potion"), self:_filterFoodstuffs("Jellyfish"),
+        self:_filterFoodstuffs("Food")
 
     -- check thresholds
     -- excalibur thresh
-    local excalThresholdType, excalThresholdValue = self.config.thresholds.healthThreshold.excalThresholdType, self.config.thresholds.healthThreshold.excalThreshold
-    local excalThreshold = (excalThresholdType == "percent" and excalThresholdValue >= self.state.health.percent) or (excalThresholdType == "current" and excalThresholdValue >= self.state.health.current)
-    -- general trhesh
-    local valueType, value = self.config.thresholds.healthThreshold.valueType, self.config.thresholds.healthThreshold.value
-    local threshold = (valueType == "percent" and value >= self.state.health.percent) or (valueType == "current" and value >= self.state.health.current)
+    local excalThresholdType, excalThresholdValue = self.config.thresholds.healthThreshold.excalThresholdType,
+        self.config.thresholds.healthThreshold.excalThreshold
+    local excalThreshold = (excalThresholdType == "percent" and excalThresholdValue >= self.state.health.percent) or
+    (excalThresholdType == "current" and excalThresholdValue >= self.state.health.current)
+    -- general thresh
+    local valueType, value = self.config.thresholds.healthThreshold.valueType,
+        self.config.thresholds.healthThreshold.value
+    local threshold = (valueType == "percent" and value >= self.state.health.percent) or
+    (valueType == "current" and value >= self.state.health.current)
     -- critical thresh
-    local criticalValueType, criticalValue = self.config.thresholds.healthThreshold.criticalValueType, self.config.thresholds.healthThreshold.criticalValue
-    local criticalThreshold = (criticalValueType == "percent" and criticalValue >= self.state.health.percent) or (criticalValueType == "current" and criticalValue >= self.state.health.current)
+    local criticalValueType, criticalValue = self.config.thresholds.healthThreshold.criticalValueType,
+        self.config.thresholds.healthThreshold.criticalValue
+    local criticalThreshold = (criticalValueType == "percent" and criticalValue >= self.state.health.percent) or
+    (criticalValueType == "current" and criticalValue >= self.state.health.current)
 
     -- do stuff
     if excalThreshold then self:useExcalibur() end
-    if threshold then self:oneTickEat(criticalThreshold) end
+    if threshold and #self.foodStuffs > 0 then self:oneTickEat(criticalThreshold) end
+    if criticalThreshold and #self.foodStuffs == 0 then
+        return -- gtfo bro
+    end
+end
+
+--#endregion
+
+--#region prayer management stuff
+
+---checks if player has elven ritual shard in inventory
+---@return boolean
+function PlayerManager:_hasElvenShard()
+    return API.InvItemFound1(43358)
+end
+
+---uses elven ritual shard
+function PlayerManager:useElvenShard()
+    local currentTick = API.Get_tick()
+
+    --do shard check
+    if not self:_hasElvenShard() or self:getDebuff(43358).found or currentTick - 1 <= self.playerManagementState.lastElvenShardTick then return end
+
+    if API.DoAction_Inventory1(43358, 0, 1, API.OFF_ACT_GeneralInterface_route) then
+        self.playerManagementState.lastElvenShardTick = currentTick
+        return true
+    else
+        return false
+    end
+end
+
+---checks to make sure that the player has something they can consume to regain prayer in their inventory
+---@private
+---@return Stuff[]
+function PlayerManager:_getPrayerItems()
+    local potions = {
+        "Prayer", "Super restore", "Sanfew",
+        "Super prayer", "Spiritual prayer", "Extreme prayer",
+        "Blessed flask"     -- untested
+    }
+
+    local prayerStuffs = {}
+    local inventoryItems = API.ReadInvArrays33()
+
+    -- lol
+    for _, item in ipairs(inventoryItems) do
+        -- check that slot is not empty and that stack size is 1
+        if item.itemid1 ~= -1 and item.itemid1_size == 1 then
+            local itemName = item.textitem:gsub("<col=f8d56b>", "")
+            --check if its a potion (not sure if there are other types)
+            for _, v in pairs(potions) do
+                if string.find(itemName, v) then
+                    self._sortStuffs(prayerStuffs, itemName, item.itemid1, "Potion")
+                end
+            end
+        end
+    end
+
+    self.prayerStuffs = prayerStuffs
+    return prayerStuffs
+end
+
+---get the number of prayer restoring items in your inventory
+---@private
+---@return number
+function PlayerManager:_getPrayerItemCount()
+    local prayerItem = 0
+
+    for _, item in pairs(self.prayerStuffs) do
+        prayerItem = prayerItem + item.count
+    end
+
+    return prayerItem
+end
+
+---consumes first prayer item found & returns true if action taken
+---@return boolean
+function PlayerManager:drink()
+    local currentTick = API.Get_tick()
+    if currentTick - 1 <= self.playerManagementState.lastDrinkTick then return false end
+
+    local item = self.prayerStuffs[1]
+    if API.DoAction_Inventory1(item.id, 0, 1, API.OFF_ACT_GeneralInterface_route) then
+        self.playerManagementState.lastDrinkTick = currentTick
+        API.RandomSleep2(30, 10, 20)
+        return true
+    else
+        return false
+    end
+end
+
+---manages player prayer
+function PlayerManager:_managePrayer()
+    -- check thresholds
+    -- elven ritual shard thresh
+    local shardThresholdType = self.config.thresholds.prayerThreshold.shardThresholdType
+    local shardThresholdValue = self.config.thresholds.prayerThreshold.shardThreshold
+    local shardThreshold = (shardThresholdType == "percent" and shardThresholdValue >= self.state.prayer.percent) or
+    (shardThresholdType == "current" and shardThresholdValue >= self.state.prayer.current)
+    -- general thresh
+    local valueType = self.config.thresholds.prayerThreshold.valueType
+    local value = self.config.thresholds.prayerThreshold.value
+    local threshold = (valueType == "percent" and value >= self.state.prayer.percent) or
+    (valueType == "current" and value >= self.state.prayer.current)
+    -- critical thresh
+    local criticalValueType = self.config.thresholds.prayerThreshold.criticalValueType
+    local criticalValue = self.config.thresholds.prayerThreshold.criticalValue
+    local criticalThreshold = (criticalValueType == "percent" and criticalValue >= self.state.prayer.percent) or
+    (criticalValueType == "current" and criticalValue >= self.state.prayer.current)
+
+    -- do stuff
+    if shardThreshold then self:useElvenShard() end
+    if threshold and #self.prayerStuffs > 0 then self:drink() end
+    if criticalThreshold and #self.prayerStuffs < 0 then
+        return -- gtfo bro
+    end
 end
 
 --#endregion
@@ -551,15 +618,8 @@ function PlayerManager:stateTracking()
     local metrics = {
         { "Player State:", "" },
         -- stats
-        { "- Health", string.format("%d/%d (%d%%)",
-            self.state.health.current,
-            self.state.health.max,
-            self.state.health.percent) },
-        { "- Prayer", string.format("%d/%d (%d%%)",
-            self.state.prayer.current,
-            self.state.prayer.max,
-            self.state.prayer.percent) },
-        { "- Adrenaline",  self.state.adrenaline },
+        { "- Health",      self.state.health.current .. "/" .. self.state.health.max .. " (" .. self.state.health.percent .. "%)" },
+        { "- Prayer",      self.state.prayer.current .. "/" .. self.state.prayer.max .. " (" .. self.state.prayer.percent .. "%)" },
         -- location
         { "- Coordinates", string.format("(X:%s, Y:%s, Z:%s)",
             self.state.coords.x,
@@ -578,24 +638,37 @@ end
 ---@return table
 function PlayerManager:managementTracking()
     local metrics = {
-        { "Player Management:", "" },
+        { "Player Management:",         "" },
         -- items
-        { "- Items: ", ""},
-        { "-- Has Excalibur?", self:_hasExcalibur() and "Yes" or "No"},
-        { "-- Has Elven ritual shard?", self:_hasElvenShard() and "Yes" or "No"},
-        { "-- Edible food count:", self:_getFoodCount()}
+        { "- Items: ",                  "" },
+        { "-- Has Excalibur?",          self:_hasExcalibur() and "Yes" or "No" },
+        { "-- Has Elven ritual shard?", self:_hasElvenShard() and "Yes" or "No" },
+        { "-- Edible food count:",      self:_getFoodCount() }
     }
     return metrics
 end
 
 function PlayerManager:foodStuffsTracking()
-    local metrics = {{"- Food Stuff:", ""}}
+    local metrics = { { "- Food Stuff:", "" } }
 
     if #self.foodStuffs < 1 then
-        table.insert(metrics, {"-- No foods found", ""})
+        table.insert(metrics, { "-- No foods found", "" })
     else
         for _, i in ipairs(self.foodStuffs) do
-            table.insert(metrics, {"-- "..i.count.."x "..i.type, i.name})
+            table.insert(metrics, { "-- " .. i.count .. "x " .. i.type, i.name })
+        end
+    end
+    return metrics
+end
+
+function PlayerManager:prayerStuffsTracking()
+    local metrics = { { "- Prayer Stuff:", "" } }
+
+    if #self.prayerStuffs < 1 then
+        table.insert(metrics, { "-- No prayer items found", "" })
+    else
+        for _, i in ipairs(self.prayerStuffs) do
+            table.insert(metrics, { "-- " .. i.count .. "x " .. i.type, i.name })
         end
     end
     return metrics
@@ -605,8 +678,10 @@ end
 
 ---updates the player state
 function PlayerManager:update()
-    self:_updatePlayerState()
-    -- check if we should override health
+    self:_updatePlayerState() -- refresh player data
+    self:_getEdibleItems()    -- get the foodstuffs
+    self:_getPrayerItems()    -- get the prayerstuffs
+    -- check if we should override health management
     local overrideHealthManagement = (
         type(self.config.overrideHealthManagement) == "function" and
         function() return self.config.overrideHealthManagement() end
@@ -616,6 +691,17 @@ function PlayerManager:update()
     -- do health management
     if not overrideHealthManagement then
         self:_manageHealth()
+    end
+    -- check if we should override prayer management
+    local overridePrayerManagement = (
+        type(self.config.overridePrayerManagement) == "function" and
+        function() return self.config.overridePrayerManagement() end
+    ) or (
+        type(self.config.overridePrayerManagement) == "boolean" and self.config.overridePrayerManagement
+    ) or false
+    -- do prayer management
+    if not overridePrayerManagement then
+        self:_managePrayer()
     end
 end
 
