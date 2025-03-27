@@ -1,77 +1,36 @@
-# Sonson's Player Manager
-## Overview
-Sonson's Player Manager is an advanced Lua script designed to comprehensively track, manage, and optimize a player's in-game state. Beyond simple tracking, this script provides intelligent health management, dynamic location detection, and extensive player state monitoring.
+# PlayerManager
+
+A comprehensive player state and management utility providing advanced tracking, health management, and dynamic location detection.
 
 ## Features
-### Health Management
-- Automatic health monitoring and recovery
-- Configurable health thresholds with multiple detection modes
-  - Percentage-based or absolute value thresholds
-- Advanced one-tick eating strategies
-- Intelligent healing item usage
-  - Automatic detection and prioritization of:
-    - Jellies
-    - Potions (Sara brew, Guthix rest)
-    - Food items
-- Enhanced Excalibur usage management
-  - Automatic detection in inventory or equipped
-  - Conditional usage based on health thresholds
 
-### Dynamic Location Tracking
-- Support for both static and dynamic location detection
-- Flexible location identification methods
-- Easy addition of custom location rules
-- Precise coordinate-based and function-based detection
-- Automatic location determination during gameplay
+- **Dynamic State Tracking**
+  - Real-time player health, prayer, and location monitoring
+  - Detailed state and inventory tracking
+  - Automatic health and prayer management
 
-### Comprehensive Player State Tracking
-- Detailed health monitoring
-  - Current and maximum health points
-  - Health percentage calculation
-- Prayer point tracking
-  - Current and maximum prayer points
-  - Prayer percentage calculation
-- Advanced state information
-  - Adrenaline level tracking
-  - Player movement status detection
-  - Combat state monitoring
-  - Current animation recording
-  - Precise coordinate logging
+- **Intelligent Item Management**
+  - Automatic food and prayer potion consumption
+  - One-tick eating strategies
+  - Excalibur and Elven Shard usage detection
 
-### Advanced Inventory Management
-- Automatic food and potion sorting
-- Intelligent item detection and usage
-- Tracking of specific utility items
-  - Enhanced Excalibur
-  - Elven Ritual Shard
-- Comprehensive food inventory categorization
-  - Potions
-  - Jellies
-  - Consumable foods
+- **Flexible Configuration**
+  - Configurable health and prayer thresholds
+  - Static and dynamic location detection
+  - Management system overrides
 
-### Flexible Configuration
-- Highly customizable health management
-- Configurable thresholds for:
-  - Health recovery
-  - Critical health levels
-  - Enhanced Excalibur usage
-- Override options for management systems
-- Customizable management strategies
+## Installation
 
-## Tracking Capabilities
-- `stateTracking()`: Comprehensive player state metrics
-- `managementTracking()`: Detailed player management data
-- `foodStuffsTracking()`: Granular food inventory tracking
+Save `player_manager.lua` in your `Lua_Scripts` folder
 
 ## Usage
-### Installation
-Save `player_manager.lua` in your `Lua_Scripts` folder.
 
-### Import and Configuration
+### Basic Initialization
+
 ```lua
 local PlayerManager = require("player_manager")
 
--- Define configuration
+-- Create a basic configuration
 local config = {
     locations = {
         staticLocations = {
@@ -82,10 +41,9 @@ local config = {
         },
         dynamicLocations = {
             {
-                name = "Rasial Instance",
+                name = "Boss Instance",
                 detectionFn = function()
-                    -- Custom detection logic
-                    return isInBossRoom()
+                    return isInBossRoom(gateTile)  -- Custom detection logic
                 end
             }
         }
@@ -93,31 +51,43 @@ local config = {
     thresholds = {
         healthThreshold = {
             valueType = "percent",
-            value = 50,           -- Trigger at 50% health
+            value = 50,                     -- Trigger at 50% health
             criticalValueType = "current",
-            criticalValue = 2000,   -- Critical threshold at 2000 LP
+            criticalValue = 2000,           -- Critical threshold at 2,000 health
             excalThresholdType = "percent",
-            excalThreshold = 75   -- Use Excalibur at 75% health
+            excalThreshold = 75             -- Use Enhanced Excalibur at 75% health
+        },
+        prayerThreshold = {
+            valueType = "percent",
+            value = 30,                    -- Trigger prayer management at 30%
+            criticalValueType = "current",
+            criticalValue = 100,           -- Critical prayer threshold at 100 prayer points
+            shardValueType = "percent",
+            shardValue = 50                -- Use Elven Ritual Shard at 50% prayer
         }
     },
-    overrideHealthManagement = false  -- Optional override
+    overrideHealthManagement = false,
+    overridePrayerManagement = false
 }
 
--- Create PlayerManager instance
 local playerManager = PlayerManager.new(config)
 ```
 
-### Continuous Monitoring
+### Advanced Usage
+
+#### Continuous Monitoring
+
 ```lua
 while API.Read_LoopyLoop() do
-    -- Update player state
+    -- Update player state and perform automatic management
     playerManager:update()
-
-    -- Optional: Retrieve tracking metrics
+    
+    -- Retrieve and process tracking metrics
     local stateMetrics = playerManager:stateTracking()
     local managementMetrics = playerManager:managementTracking()
     local foodMetrics = playerManager:foodStuffsTracking()
-
+    local prayerMetrics = playerManager:prayerStuffsTracking()
+    
     -- Custom processing or display
     API.DrawTable(stateMetrics)
     
@@ -125,38 +95,83 @@ while API.Read_LoopyLoop() do
 end
 ```
 
-## Configuration Tips
-- Use percentage or absolute value thresholds
-- Create dynamic location detection functions
-- Call `update()` consistently for real-time state management
-- Leverage tracking methods for comprehensive insights
+#### Manual Calls
 
-## Upcoming Features
-- Prayer Management System
-- Buff Tracking and Management
-- Summoning Interaction Mechanics
+```lua
+-- Manually check buffs and debuffs from your main script
+local buff   = playerManager:getBuff(BUFF_ID)
+local debuff = playerManager:getDebuff(DEBUFF_ID)
+
+-- Manually use Enhanced Excalibur and Elven Ritual Shard 
+playerManager:useExcalibur()     -- automatically checks if in inventory or equipped
+playerManager:useElvenShard()    -- also checks for debuff before attempting to use
+
+-- Add custom locations dynamically (static and dynamic locations!)
+playerManager:addStaticLocation({name = "Custom Area", coords = { x = 1234, y = 5678, range = 50 }})
+playerManager:addDynamicLocation({name = "Boss Area", detectionFn = function() return interfaceExists(bossTimerInterface) end})
+
+-- Eat food and restore prayer [no need to define what to eat or drink!]
+playerManager:oneTickEat(playerHealth < 1000)  -- paramater is for eating food that would drain adren
+playerManager:drink()                          -- drinks first available prayer restoring item
+```
+
+## Configuration Options
+
+### Threshold Types
+
+- `valueType`: Define thresholds as `"percent"` or `"current"`
+- Supports flexible configuration for health, prayer, and special item usage
+
+### Location Detection
+
+- **Static Locations**: Define areas by coordinates and range
+- **Dynamic Locations**: Use custom detection functions for complex scenarios
+
+### Management Overrides
+
+- `overrideHealthManagement`: Disable automatic health management
+- `overridePrayerManagement`: Disable automatic prayer management
+- Can be set as boolean or function for dynamic control
+
+## Performance Considerations
+
+- Call `update()` consistently for real-time state management
+- Customize detection functions for efficiency
+- Use tracking methods sparingly in performance-critical sections
 
 ## Changelog
+
+### v1.1.1
+* **Introduced Prayer Management**
+   * Added Elven Ritual Shard detection and usage
+   * Implemented comprehensive prayer item tracking
+   * Developed configurable prayer management thresholds
+   * Enhanced prayer potion consumption strategies
+   * Added `prayerStuffsTracking()` method for detailed prayer inventory analysis
+* **Added More Failsafes**
+
 ### v1.1.0
-- **Health Management Overhaul**
-  - Implemented automatic health recovery system
-  - Added configurable health thresholds
-  - Developed one-tick eating strategies
-  - Integrated automatic healing item usage
-  - Enhanced Excalibur detection and management
-
-- **Location Tracking Improvements**
-  - Added methods for dynamic and static location management
-  - Refined location detection logic
-
-- **New Tracking Methods**
-  - Introduced `stateTracking()` for comprehensive metrics
-  - Added `managementTracking()` for management insights
-  - Created `foodStuffsTracking()` for detailed food inventory analysis
-
-- **Configuration Enhancements**
-  - Expanded configuration flexibility
-  - Added override capabilities for health, prayer, and management systems
+* **Health Management Overhaul**
+   * Implemented automatic health recovery system
+   * Added configurable health thresholds
+   * Developed one-tick eating strategies
+   * Integrated automatic healing item usage
+   * Enhanced Excalibur detection and management
+* **Location Tracking Improvements**
+   * Added methods for dynamic and static location management
+   * Refined location detection logic
+* **New Tracking Methods**
+   * Introduced `stateTracking()` for comprehensive metrics
+   * Added `managementTracking()` for management insights
+   * Created `foodStuffsTracking()` for detailed food inventory analysis
+* **Configuration Enhancements**
+   * Expanded configuration flexibility
+   * Added override capabilities for health, prayer, and management systems
 
 ### v1.0.0
-- Initial release of Sonson's Player State
+* Initial release of Sonson's Player State
+```
+
+## License
+
+Developed by Sonson. See individual script for licensing details.
