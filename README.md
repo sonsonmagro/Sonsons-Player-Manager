@@ -139,7 +139,7 @@ Add `playerManager:update()` to your main loop.
 ```lua
 while API.Read_LoopyLoop() do
     playerManager:update()           -- That's it lol
-    doOtherStuff()                   -- Add the rest of your cod
+    doOtherStuff()                   -- Add the rest of your code
     API.RandomSleep2(100, 30, 20)    -- Sleep for 100ms
 end
 ```
@@ -168,6 +168,19 @@ while API.Read_LoopyLoop() do
 end
 ```
 
+**State Metrics Example**
+| Player State |  |
+|-----------|---------------|
+| - Health | 9900/9900 (100%) |
+| - Prayer | 420/990 (41%) |
+| - Adrenaline | 69.0 |
+| - Status | Loading last preset |
+| - Location | War's Retreat |
+| - Coordinates | (123, 456, 0) |
+| - Animation | Idle |
+| - Moving? | Yes |
+| - In Combat? | No |
+
 #### Manual Calls
 
 ```lua
@@ -184,7 +197,7 @@ playerManager:addStaticLocation({name = "Custom Area", coords = { x = 1234, y = 
 playerManager:addDynamicLocation({name = "Boss Area", detectionFn = function() return interfaceExists(bossTimerInterface) end})
 
 -- Eat food and restore prayer [no need to define what to eat or drink!]
-playerManager:oneTickEat(playerHealth < 1000)  -- paramater is for eating food that would drain adren
+playerManager:oneTickEat(playerHealth < 1000)  -- argument is for eating food that would drain adren
 playerManager:drink()                          -- drinks first available prayer restoring item
 ```
 
@@ -216,7 +229,7 @@ playerManager:drink()                          -- drinks first available prayer 
   ```lua
   Config.locations = {
       { name = "Static Location", coords = { x = 123, y = 456, range = 20 } },
-      { name = "Dynamic Location", detectod = function() return customDetectionFunction() end }
+      { name = "Dynamic Location", detector = function() return customDetectionFunction() end }
   }
   ```
   
@@ -226,7 +239,7 @@ playerManager:drink()                          -- drinks first available prayer 
 * **[NEW]: Buff Management**
   - `playerManager:manageBuffs(buffs)` to manage the buffs you need managed
   - Supports different kinds of buffs
-    - Inventory items like potions and insence
+    - Inventory items like potions and incense
     - Abilities like prayers and pocket items
       - If defined with `toggle = true` will be toggled off if no longer being managed
 - **[NEW]: Status Handler**
