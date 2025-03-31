@@ -1,24 +1,28 @@
-# [v1.1.1] Sonson's Player Manager
+# [v1.2.0] Sonson's Player Manager
 
-A comprehensive player state and management utility providing advanced tracking, health management, prayer management and dynamic location detection.
+A comprehensive player state and management utility providing advanced player state tracking, health, prayer and buff management, location detection and status handling.
 
 ## Features
 
 - **Dynamic State Tracking**
-  - Real-time player health, prayer, and location monitoring
+  - Real-time player health, prayer, location and status monitoring
   - Detailed state and inventory tracking
-  - Automatic health and prayer management
-
-- **Intelligent Item Management**
-  - Automatic food and prayer potion consumption
-  - One-tick eating strategies
-  - Excalibur and Elven Shard usage detection
 
 - **Flexible Configuration**
   - Configurable health and prayer thresholds
   - Static and dynamic location detection
-  - Management system overrides
+  - Status handling definition for simpler handling
 
+- **Health & Prayer Management**
+  - Automatic detection of food and potions in player inventory
+  - Eats and drinks depending on configuration thresholds
+  - [Enhanced Excalibur](https://runescape.wiki/w/Enhanced_Excalibur) and [Ancient elven ritual shard](https://runescape.wiki/w/Ancient_elven_ritual_shard) usage detection
+ 
+- **Buff Management**
+  - Automatically apply buffs based on customizable conditions
+  - Toggles buffs off when no longer being managed
+  - Track active buffs and their remaining duration
+  
 ## Installation
 
 Save `player_manager.lua` in your `Lua_Scripts` folder
@@ -32,45 +36,112 @@ local PlayerManager = require("player_manager")
 
 -- Create a basic configuration
 local config = {
+    health = {
+        normal = { type = "percent", value = 50 },
+        critical = { type = "current", value = 2000 },
+        special = { type = "percent", value = 65 } -- excalibur threshold
+    },
+    prayer = {
+        normal = { type = "percent", value = 20 },
+        critical = { type = "current", value = 100 },
+        special = { type = "current", value = 600 } -- elven ritual shard threshold
+    },
     locations = {
-        staticLocations = {
-            {
-                name = "War's Retreat",
-                coords = { x = 3295, y = 10137, range = 30 }
-            }
-        },
-        dynamicLocations = {
-            {
-                name = "Boss Instance",
-                detectionFn = function()
-                    return isInBossRoom(gateTile)  -- Custom detection logic
-                end
-            }
-        }
+        { name = "Static location", coords = { x = 123, y = 456, range = 0 } },
+        { name = "Dynamic location", detector = function() return customDetectionFunction() end }
     },
-    thresholds = {
-        healthThreshold = {
-            valueType = "percent",
-            value = 50,                     -- Trigger at 50% health
-            criticalValueType = "current",
-            criticalValue = 2000,           -- Critical threshold at 2,000 health
-            excalThresholdType = "percent",
-            excalThreshold = 75             -- Use Enhanced Excalibur at 75% health
+    statuses = {
+        {
+            name = "Doing specific thing",
+            condition = function(self) return self.state.location == "Static Location" end,
+            execute = function() doSpecificActions() end, -- what to do if these conditions are met
+            priority = 1 -- highest priority wins
         },
-        prayerThreshold = {
-            valueType = "percent",
-            value = 30,                    -- Trigger prayer management at 30%
-            criticalValueType = "current",
-            criticalValue = 100,           -- Critical prayer threshold at 100 prayer points
-            shardValueType = "percent",
-            shardValue = 50                -- Use Elven Ritual Shard at 50% prayer
-        }
-    },
-    overrideHealthManagement = false,
-    overridePrayerManagement = false
+        -- add more statuses as need be
+    }
 }
 
 local playerManager = PlayerManager.new(config)
+```
+
+### Initialize Buffs
+
+```lua
+buffs = {
+    {
+        buffName = "Overload",
+        buffId = 23725,
+        refreshAt = 30, -- seconds remaining before refresh
+        execute = function() 
+            return API.DoAction_Inventory1(23725, 0, 1, API.OFF_ACT_GeneralInterface_route) 
+        end,
+        canApply = function(self) 
+            return self.state.inCombat 
+        end
+    },
+    {
+        buffName = "Scripture of Ful",
+        buffId = 48242,
+        toggle = true, -- can be toggled off
+        execute = function()
+            return API.DoAction_Inventory1(48242, 0, 1, API.OFF_ACT_GeneralInterface_route)
+        end
+    }
+}
+```
+#### Buff Configuration Attributes
+
+| Attribute | Required | Type | Description |
+|-----------|:--------:|:----:|-------------|
+| `buffName` | Yes | `string` | The name of your buff. Used for using the appropriate ability or inventory item |
+| `buffId` | Yes | `number` | Used to check against active player buffs |
+| `execute` | Yes | `function` | Function called to apply the buff |
+| `canApply` | No | `boolean` or `function` | Used to determine if the buff needs to be activated. Can be a static boolean or a function that returns a boolean |
+| `toggle` | No | `boolean` | Boolean value that determines whether or not this buff should be re-activated to toggle off |
+| `refreshAt` | No | `number` | Remaining time on buff before it should be reapplied |
+
+### Managing Health, Prayer and Buffs
+
+Health, prayer and buffs can be managed however you'd like as long as you call on the appropriate methods and define the buffs according to your liking.
+
+**Example using built-in status handler**
+```lua
+Config.playerManager = {
+    statuses = {
+        {
+            name = "Waiting for Boss...",
+            condition = function(self)
+                return (self.state.location == "Rasial's Citadel (Boss Room)") and (#Utils.findAll(30165, 1, 20) == 0)
+            end,
+            execute = function(self)
+                fightRotation:execute()      -- rotation_manager
+                prayerFlicker:update()       -- prayer flicker (shameless plug)
+                self:manageHealth()
+                self:managePrayer()
+                self:manageBuffs(buffs)  
+            end,
+            priority = 1
+        }
+        -- Can add more statuses according to what you need handled
+    }
+}
+
+while API.Read_LoopyLoop() do
+    playerManager:update()
+    API.RandomSleep2(100, 30, 20)
+end
+```
+
+### Updating Player State
+
+Add `playerManager:update()` to your main loop.
+
+```lua
+while API.Read_LoopyLoop() do
+    playerManager:update()           -- That's it lol
+    doOtherStuff()                   -- Add the rest of your cod
+    API.RandomSleep2(100, 30, 20)    -- Sleep for 100ms
+end
 ```
 
 ### Advanced Usage
@@ -84,6 +155,8 @@ while API.Read_LoopyLoop() do
     
     -- Retrieve and process tracking metrics
     local stateMetrics = playerManager:stateTracking()
+    local managedBuffs = playerManager:managedBuffsTracking()
+    local activeBuffs = playerManager:activeBuffsTracking()
     local managementMetrics = playerManager:managementTracking()
     local foodMetrics = playerManager:foodStuffsTracking()
     local prayerMetrics = playerManager:prayerStuffsTracking()
@@ -119,30 +192,112 @@ playerManager:drink()                          -- drinks first available prayer 
 
 ### Threshold Types
 
-- `valueType`: Define thresholds as `"percent"` or `"current"`
+- `type`: Define thresholds as `"percent"` or `"current"`
 - Supports flexible configuration for health, prayer, and special item usage
-
+- Config example for health and prayer:
+   ```lua
+  Config.health = {
+      normal = { type = "percent", value = 50 },
+      critical = { type = "current", value = 2000 },
+      special = { type = "percent", value = 65 } -- excalibur threshold
+  }
+  
+  Config.prayer = {
+      normal = { type = "percent", value = 20 },
+      critical = { type = "current", value = 100 },
+      special = { type = "current", value = 600 } -- elven ritual shard threshold
+  }
+  ```
+   
 ### Location Detection
 
-- **Static Locations**: Define areas by coordinates and range
-- **Dynamic Locations**: Use custom detection functions for complex scenarios
-
-### Management Overrides
-
-- `overrideHealthManagement`: Disable automatic health management
-- `overridePrayerManagement`: Disable automatic prayer management
-- Can be set as boolean or function for dynamic control
-
-## Performance Considerations
-
-- Call `update()` consistently for real-time state management
-- Customize detection functions for efficiency
-- Use tracking methods sparingly in performance-critical sections
-
+- Detects the player's location based on the provided conditions
+- Locations can be dynamic or static based on how they're defined
+  ```lua
+  Config.locations = {
+      { name = "Static Location", coords = { x = 123, y = 456, range = 20 } },
+      { name = "Dynamic Location", detectod = function() return customDetectionFunction() end }
+  }
+  ```
+  
 ## Changelog
 
+### v1.2.0: Simplified Config, Added Buff Manager and State Hanler
+* **[NEW]: Buff Management**
+  - `playerManager:manageBuffs(buffs)` to manage the buffs you need managed
+  - Supports different kinds of buffs
+    - Inventory items like potions and insence
+    - Abilities like prayers and pocket items
+      - If defined with `toggle = true` will be toggled off if no longer being managed
+- **[NEW]: Status Handler**
+  - Initial implementation of built-in status handler
+  - Handles actions for different statuses
+  - Statuses are defined with new instance of player manager
+- **[UPDATED]: Health & Prayer Management**
+  ```diff
+  - Config.healthOverride
+  - Config.prayerOverride
+  Removed in favor of users directly overriding the player manager instance
+  ```
+    - Config setup was changed to be simpler
+      ```lua
+      Config.health = {
+          normal = { type = "percent", value = 50 },
+          critical = { type = "current", value = 2000 },
+          special = { type = "percent", value = 65 } -- excalibur threshold
+      }
+      
+      Config.prayer = {
+          normal = { type = "percent", value = 20 },
+          critical = { type = "current", value = 100 },
+          special = { type = "current", value = 600 } -- elven ritual shard threshold
+      }
+      ```
+    - `playerManager:manageHealth()` and `playerManager:managePrayer` are now no longer integrated in main update method
+      - To be called when needed by the user.
+- **[UPDATED]: Locations Configuration and System**
+  ```diff
+  - Config.locations.staticLocations
+  - Config.locations.dynamicLocations
+  Removed in favor of all-inclusive Config.locations
+  
+  - playerManager:addStaticLocation()
+  - playerManager:addDynamicLocation()
+  Removed in favor of users directly overriding the player manager instance
+  ```
+  - New locations config
+    ```lua
+    Config.playerManager = {
+        locations = {
+            {
+                name   = "War's Retreat",
+                coords = { x = 3295, y = 10137, range = 30 }
+            },
+            {
+                name = "Rasial's Citadel (Lobby)",
+                coords = { x = 864, y = 1742, range = 12 }
+            },
+            {
+                name = "Rasial's Citadel (Boss Room)",
+                detector = function() -- checks to see if instance timer exists
+                    local timer = {
+                        { 861, 0, -1, -1, 0 }, { 861, 2, -1, 0, 0 },
+                        { 861, 4, -1, 2,  0 }, { 861, 8, -1, 4, 0 }
+                    }
+                    local result = API.ScanForInterfaceTest2Get(false, timer)
+                    return result and #result > 0 and #result[1].textids > 0
+                end
+            },
+            {
+                name = "Death's Office",
+                detector = function() return #Utils.findAll(27299, 1, 30) > 1 end
+            },
+        }
+    }
+    ```
+  
 ### v1.1.1
-* **Introduced Prayer Management**
+* **[NEW] Prayer Management**
    * Added Elven Ritual Shard detection and usage
    * Implemented comprehensive prayer item tracking
    * Developed configurable prayer management thresholds
@@ -151,27 +306,22 @@ playerManager:drink()                          -- drinks first available prayer 
 * **Added More Failsafes**
 
 ### v1.1.0
-* **Health Management Overhaul**
+* **[NEW] Health Management**
    * Implemented automatic health recovery system
    * Added configurable health thresholds
    * Developed one-tick eating strategies
    * Integrated automatic healing item usage
    * Enhanced Excalibur detection and management
-* **Location Tracking Improvements**
-   * Added methods for dynamic and static location management
+* **[UPDATED] Location Tracking Improvements**
    * Refined location detection logic
-* **New Tracking Methods**
-   * Introduced `stateTracking()` for comprehensive metrics
-   * Added `managementTracking()` for management insights
-   * Created `foodStuffsTracking()` for detailed food inventory analysis
-* **Configuration Enhancements**
+* **[NEW] Tracking Methods**
+   * `playerManager:stateTracking()` for comprehensive metrics
+   * `playerManager:managementTracking()` for management insights
+   * `playerManager:foodStuffsTracking()` for detailed food inventory analysis
+   * Added methods for dynamic and static location management
+* **[UPDATED] Configuration Enhancements**
    * Expanded configuration flexibility
    * Added override capabilities for health, prayer, and management systems
 
 ### v1.0.0
 * Initial release of Sonson's Player State
-```
-
-## License
-
-Developed by Sonson. See individual script for licensing details.
