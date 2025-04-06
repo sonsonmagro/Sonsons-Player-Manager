@@ -176,7 +176,8 @@ end
 | - Adrenaline | 69.0 |
 | - Status | Loading last preset |
 | - Location | War's Retreat |
-| - Coordinates | (123, 456, 0) |
+| - Orientation | 315 |
+| - Coordinates | (123, 456, 789) |
 | - Animation | Idle |
 | - Moving? | Yes |
 | - In Combat? | No |
