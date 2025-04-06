@@ -1,4 +1,4 @@
----@version 1.1.1
+---@version 1.2.3
 --[[
     File: player_manager.lua
     Description: Manage your player's state from one dynamic instance
@@ -7,7 +7,10 @@
     TODO:
     - Add player_manager features
         - Summoning Management
+        - Aura Management
 ]]
+
+local debug = true
 
 ---@class PlayerManager
 ---@field config PlayerManagerConfig
@@ -69,6 +72,7 @@ PlayerManager.__index = PlayerManager
 ---@field buff number
 ---@field excal number
 ---@field shard number
+---@field tele number
 
 ---@class Buff
 ---@field buffName string
@@ -94,17 +98,24 @@ PlayerManager.__index = PlayerManager
 ---@field prayer Stat
 ---@field adrenaline number
 ---@field location string
+---@field orientation number
 ---@field status string
 ---@field coords WPOINT
 ---@field animation number
 ---@field moving boolean
 ---@field inCombat boolean
 
+---@class FamiliarState
+---@field name string
+---@field id number
+---@field remaining number seconds
+---@field hasScrolls boolean
+---@field scrollCount number?
+
 --#endregion
 
 local API = require("api")
 local BUFF_INTERVAL_CHECK = 2
-local debug = false
 
 --#region initialize PlayerManager
 
@@ -117,14 +128,14 @@ function PlayerManager.new(config)
     -- initialize config
     self.config = config or {
         health = {
-            normal = {type = "percent", value = 50},
-            critical = {type = "percent", value = 25},
-            special = {type = "percent", value = 75}   -- Excalibur threshold
+            normal = { type = "percent", value = 50 },
+            critical = { type = "percent", value = 25 },
+            special = { type = "percent", value = 75 } -- Excalibur threshold
         },
         prayer = {
-            normal = {type = "current", value = 200},
-            critical = {type = "percent", value = 10},
-            special = {type = "current", value = 600}  -- Shard threshold
+            normal = { type = "current", value = 200 },
+            critical = { type = "percent", value = 10 },
+            special = { type = "current", value = 600 } -- Shard threshold
         },
         locations = {}
     }
@@ -132,12 +143,13 @@ function PlayerManager.new(config)
 
     -- initialize player state
     self.state = {
-        health = {current = 0, max = 0, percent = 0},
-        prayer = {current = 0, max = 0, percent = 0},
+        health = { current = 0, max = 0, percent = 0 },
+        prayer = { current = 0, max = 0, percent = 0 },
         adrenaline = 0,
         location = "UNKNOWN",
+        orientation = 999,
         status = "Idle",
-        coords = {x = 0, y = 0, z = 0},
+        coords = { x = 0, y = 0, z = 0 },
         animation = -1,
         moving = false,
         inCombat = false
@@ -149,7 +161,8 @@ function PlayerManager.new(config)
         drink = 0,
         buff = 0,
         excal = 0,
-        shard = 0
+        shard = 0,
+        tele = 0
     }
 
     self.inventory = {
@@ -171,10 +184,7 @@ end
 
 function PlayerManager.debugLog(message)
     if debug then
-        print(
-            "[PLAYER MANAGER]:",
-            message
-        )
+        API.logDebug("[PLAYER MANAGER]: "..message)
     end
 end
 
@@ -194,6 +204,11 @@ function PlayerManager:_determineLocation()
     return "UNKNOWN"
 end
 
+--determines the direction the prayer is facing
+function PlayerManager:_determineOrientation()
+    local orientation = math.floor(API.calculatePlayerOrientation()) % 360
+    return orientation
+end
 
 ---make stat
 ---@param current number
@@ -205,6 +220,16 @@ function PlayerManager:_createStat(current, max)
         max = max,
         percent = max > 0 and math.floor((current / max) * 100) or 0
     }
+end
+
+function PlayerManager:_teleportToWars()
+    local currentTick = API.Get_tick()
+    if self.timestamp.tele - currentTick < 10 then
+        if API.DoAction_Ability("War's Retreat Teleport", 1, API.OFF_ACT_GeneralInterface_route, true) then
+            self.debugLog(string.format("Out of food items (%s | %s%%), teleporting out!", self.state.health.current, self.state.health.percent))
+            self.timestamp.tele = currentTick
+        end
+    end
 end
 
 ---updates values in the PlayerState instance
@@ -223,8 +248,9 @@ function PlayerManager:_updatePlayerState()
     self.state.adrenaline = adrenData and adrenData.state / 10 or 0
 
     -- position & movement
-    self.state.coords = API.PlayerCoord()
+    self.state.coords = {x = API.PlayerCoord().x, y = API.PlayerCoord().y, z = API.PlayerRegion().z}
     self.state.location = self:_determineLocation()
+    self.state.orientation = self:_determineOrientation()
     self.state.animation = API.ReadPlayerAnim() or -1
     self.state.moving = API.ReadPlayerMovin2() or false
     self.state.inCombat = API.GetInCombBit() or false
@@ -236,7 +262,7 @@ function PlayerManager:_handleStatuses()
     local activeStatus = nil
 
     for _, status in ipairs(self.config.statuses or {}) do
-        if status.condition(self) and status.priority > highestPriority then
+        if status.condition(self) and (status.priority > highestPriority) then
             highestPriority = status.priority
             activeStatus = status
         end
@@ -250,7 +276,7 @@ function PlayerManager:_handleStatuses()
     end
 
     if activeStatus and oldstatus ~= activeStatus.name then
-        PlayerManager.debugLog("Status change detected: "..oldstatus.." -> "..activeStatus.name)
+        PlayerManager.debugLog("Status change detected: " .. oldstatus .. " -> " .. activeStatus.name)
     end
 end
 
@@ -410,14 +436,15 @@ end
 ---@return {found: boolean, remaining: number}
 function PlayerManager:getBuff(buffId)
     local buff = API.Buffbar_GetIDstatus(buffId, false)
-    return {found = buff.found, remaining = buff.found and API.Bbar_ConvToSeconds(buff) or 0}
+    return { found = buff.found, remaining = (buff.found and API.Bbar_ConvToSeconds(buff)) or 0 }
 end
 
 ---checks if the player has a specific debuff
 ---@param debuffId number
 ---@return Bbar
 function PlayerManager:getDebuff(debuffId)
-    return API.DeBuffbar_GetIDstatus(debuffId, false) or false
+    local debuff = API.DeBuffbar_GetIDstatus(debuffId, false)
+    return { found = debuff.found or false, remaining = (debuff.found and API.Bbar_ConvToSeconds(debuff)) or 0 }
 end
 
 --#endregion
@@ -434,10 +461,10 @@ function PlayerManager:_hasExcalibur()
     }
 
     for _, id in ipairs(excalIds) do
-        if API.InvItemFound1(id) then                   -- check inventory
+        if API.InvItemFound1(id) then -- check inventory
             return { location = "inventory", id = id }
         end
-        if API.GetEquipSlot(5).itemid1 == id then       -- check offhand
+        if API.GetEquipSlot(5).itemid1 == id then -- check offhand
             return { location = "equipped", id = id }
         end
     end
@@ -473,9 +500,11 @@ end
 function PlayerManager:_eat(type)
     local item = self:_filterFoodItems(type)[1]
     if API.DoAction_Inventory1(item.id, 0, 1, API.OFF_ACT_GeneralInterface_route) then
-        API.RandomSleep2(60, 10, 20) --TODO: this is sus
+        API.RandomSleep2(60, 10, 20)
         return true
-    else return false end
+    else
+        return false
+    end
 end
 
 ---eats all food in one tick
@@ -484,12 +513,13 @@ function PlayerManager:oneTickEat(critical)
     local currentTick = API.Get_tick()
     --first check last drink and eat tick?
     if currentTick - self.timestamp.eat < BUFF_INTERVAL_CHECK then return end
+    self.debugLog(string.format("Health is low (%s | %s%%), attempting to eat", self.state.health.current, self.state.health.percent))
 
     if critical then
         if #self:_filterFoodItems("food") > 0 then
             if self:_eat("food") then
                 self.timestamp.eat = currentTick
-                API.RandomSleep2(60, 10, 20) --TODO: all these sleeps are sus
+                API.RandomSleep2(60, 10, 20)
             end
         end
     end
@@ -521,9 +551,10 @@ function PlayerManager:manageHealth()
         self:oneTickEat(criticalThreshold)
         return
     end
-
+    
     if criticalThreshold and #self.inventory.food == 0 then
-        return -- gtfo bro
+        
+        self:_teleportToWars()
     end
 end
 
@@ -541,7 +572,7 @@ end
 function PlayerManager:useElvenShard()
     --do shard check
     if not self:_hasElvenShard() or self:getDebuff(43358).found then return end
-    if API.Get_tick() - self.timestamp.shard < BUFF_INTERVAL_CHECK  then return end
+    if API.Get_tick() - self.timestamp.shard < BUFF_INTERVAL_CHECK then return end
 
     if API.DoAction_Inventory1(43358, 0, 1, API.OFF_ACT_GeneralInterface_route) then
         self.timestamp.shard = API.Get_tick()
@@ -555,14 +586,14 @@ end
 ---@return boolean
 ---@param potionId? number
 function PlayerManager:drink(potionId)
-    if API.Get_tick() - self.timestamp.drink < BUFF_INTERVAL_CHECK  then return false end
+    if API.Get_tick() - self.timestamp.drink < BUFF_INTERVAL_CHECK then return false end
 
     local itemId = potionId or self.inventory.prayer[1].id
     if not API.CheckInvStuff2(itemId) then return false end
 
     if API.DoAction_Inventory1(itemId, 0, 1, API.OFF_ACT_GeneralInterface_route) then
         self.timestamp.drink = API.Get_tick()
-        API.RandomSleep2(60, 10, 20) -- TODO: sus sleep?
+        API.RandomSleep2(60, 10, 20)
         return true
     else
         return false
@@ -584,7 +615,7 @@ function PlayerManager:managePrayer()
     end
 
     if criticalThreshold and #self.inventory.prayer < 0 then
-        return -- gtfo bro
+        PlayerManager:_teleportToWars()
     end
 end
 
@@ -696,9 +727,10 @@ function PlayerManager:stateTracking()
         { "- Prayer",      self.state.prayer.current .. "/" .. self.state.prayer.max .. " (" .. self.state.prayer.percent .. "%)" },
         { "- Adrenaline",  self.state.adrenaline },
         -- status
-        { "- Status",   self.state.status },
+        { "- Status",      self.state.status },
         -- location
-        { "- Location",   self.state.location },
+        { "- Location",    self.state.location },
+        { "- Direction",   self.state.orientation },
         { "- Coordinates", string.format("(%s, %s, %s)",
             self.state.coords.x,
             self.state.coords.y,
@@ -715,19 +747,19 @@ end
 ---@return table
 function PlayerManager:managementTracking()
     local metrics = {
-        { "Player Management:", "" },
-        { "- Items: ", "" },
-        { "-- Has Excalibur?",          self:_hasExcalibur() and "Yes" or "No"},
-        { "-- Has Elven ritual shard?", self:_hasElvenShard() and "Yes" or "No"},
-        { "-- Edible food count:",      self:_getItemCount(self.inventory.food)},
-        { "-- Prayer items count:",     self:_getItemCount(self.inventory.prayer)}
+        { "Player Management:",         "" },
+        { "- Items: ",                  "" },
+        { "-- Has Excalibur?",          self:_hasExcalibur() and "Yes" or "No" },
+        { "-- Has Elven ritual shard?", self:_hasElvenShard() and "Yes" or "No" },
+        { "-- Edible food count:",      self:_getItemCount(self.inventory.food) },
+        { "-- Prayer items count:",     self:_getItemCount(self.inventory.prayer) }
     }
     return metrics
 end
 
 ---@return table
-function PlayerManager:foodStuffsTracking()
-    local metrics = { { "- Food Stuff:", "" } }
+function PlayerManager:foodItemsTracking()
+    local metrics = { { "- Food Items:", "" } }
 
     if #self.inventory.food < 1 then
         table.insert(metrics, { "-- No foods found", "" })
@@ -740,8 +772,8 @@ function PlayerManager:foodStuffsTracking()
 end
 
 ---@return table
-function PlayerManager:prayerStuffsTracking()
-    local metrics = { { "- Prayer Stuff:", "" } }
+function PlayerManager:prayerItemsTracking()
+    local metrics = { { "- Prayer Items:", "" } }
 
     if #self.inventory.prayer < 1 then
         table.insert(metrics, { "-- No prayer items found", "" })
@@ -761,7 +793,7 @@ function PlayerManager:managedBuffsTracking()
         table.insert(metrics, { "-- No buffs found", "" })
     else
         for _, i in pairs(self.buffs.managed) do
-            table.insert(metrics, { "-- " .. i.buffId ..": " .. i.buffName, "Remaining: ".. i.remaining})
+            table.insert(metrics, { "-- " .. i.buffId .. ": " .. i.buffName, "Remaining: " .. i.remaining })
         end
     end
     return metrics
@@ -776,7 +808,8 @@ function PlayerManager:activeBuffsTracking()
         table.insert(metrics, { "-- No buffs found", "" })
     else
         for _, i in pairs(activeBuffs) do
-            table.insert(metrics, { "-- " .. i.id ..": ".. self:_getBuffName(i), "Text (conv): ".. i.text .. " (" .. i.conv_text .. ")"})
+            table.insert(metrics,
+                { "-- " .. i.id .. ": " .. self:_getBuffName(i), "Text (conv): " .. i.text .. " (" .. i.conv_text .. ")" })
         end
     end
     return metrics
@@ -788,9 +821,9 @@ end
 function PlayerManager:update()
     self:_untoggleBuffs()
     self.buffs.managed = {}
-    self:_updatePlayerState()           -- refresh player data
-    self:_scanInventoryCategory()       -- get the inventory items
-    self:_handleStatuses()              -- handle statuses
+    self:_updatePlayerState()     -- refresh player data
+    self:_scanInventoryCategory() -- get the inventory items
+    self:_handleStatuses()        -- handle statuses
 end
 
 return PlayerManager
