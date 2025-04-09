@@ -1,4 +1,4 @@
-# [v1.2.0] Sonson's Player Manager
+# [v1.2.4] Sonson's Player Manager
 
 A comprehensive player state and management utility providing advanced player state tracking, health, prayer and buff management, location detection and status handling.
 
@@ -100,49 +100,6 @@ buffs = {
 | `toggle` | No | `boolean` | Boolean value that determines whether or not this buff should be re-activated to toggle off |
 | `refreshAt` | No | `number` | Remaining time on buff before it should be reapplied |
 
-### Managing Health, Prayer and Buffs
-
-Health, prayer and buffs can be managed however you'd like as long as you call on the appropriate methods and define the buffs according to your liking.
-
-**Example using built-in status handler**
-```lua
-Config.playerManager = {
-    statuses = {
-        {
-            name = "Waiting for Boss...",
-            condition = function(self)
-                return (self.state.location == "Rasial's Citadel (Boss Room)") and (#Utils.findAll(30165, 1, 20) == 0)
-            end,
-            execute = function(self)
-                fightRotation:execute()      -- rotation_manager
-                prayerFlicker:update()       -- prayer flicker (shameless plug)
-                self:manageHealth()
-                self:managePrayer()
-                self:manageBuffs(buffs)  
-            end,
-            priority = 1
-        }
-        -- Can add more statuses according to what you need handled
-    }
-}
-
-while API.Read_LoopyLoop() do
-    playerManager:update()
-    API.RandomSleep2(100, 30, 20)
-end
-```
-
-### Updating Player State
-
-Add `playerManager:update()` to your main loop.
-
-```lua
-while API.Read_LoopyLoop() do
-    playerManager:update()           -- That's it lol
-    doOtherStuff()                   -- Add the rest of your code
-    API.RandomSleep2(100, 30, 20)    -- Sleep for 100ms
-end
-```
 
 ### Advanced Usage
 
@@ -236,7 +193,16 @@ playerManager:drink()                          -- drinks first available prayer 
   
 ## Changelog
 
-### v1.2.0: Simplified Config, Added Buff Manager and State Hanler
+### v1.2.4: Removed status handling, added more methods
+* **[REMOVED] Status Handler**
+    - This has been removed in favor of delegating status handling to timers
+* **[NEW] Added new methods**
+    - `PlayerManager:isPlayerIdle()`
+    - `PlayerManager:isPlayerAtLocation(coords)`
+    - `PlayerManager:getFacingDirection()`
+* **[FXED] War's Retreat Teleport now working as intended**
+
+### v1.2.0: Simplified Config, Added Buff Manager and State Handler
 * **[NEW]: Buff Management**
   - `playerManager:manageBuffs(buffs)` to manage the buffs you need managed
   - Supports different kinds of buffs
