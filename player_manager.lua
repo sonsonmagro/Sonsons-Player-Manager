@@ -1,4 +1,4 @@
----@version 1.2.3
+---@version 1.2.4
 --[[
     File: player_manager.lua
     Description: Manage your player's state from one dynamic instance
@@ -26,8 +26,7 @@ PlayerManager.__index = PlayerManager
 ---@class PlayerManagerConfig
 ---@field health ThresholdSettings
 ---@field prayer ThresholdSettings
----@field statuses Status[]?
----@field locations Location[]
+---@field locations Location[]?
 
 ---@class ThresholdSettings
 ---@field normal Threshold
@@ -49,12 +48,6 @@ PlayerManager.__index = PlayerManager
 ---@field name string
 ---@field coords {x: number, y: number, range: number, z?:number}?
 ---@field detector function?
-
----@class Status
----@field name string
----@field priority number?
----@field condition fun(self): boolean
----@field execute fun(self)
 
 ---@class PMInventoryItem
 ---@field name string
@@ -99,7 +92,6 @@ PlayerManager.__index = PlayerManager
 ---@field adrenaline number
 ---@field location string
 ---@field orientation number
----@field status string
 ---@field coords WPOINT
 ---@field animation number
 ---@field moving boolean
@@ -140,7 +132,6 @@ function PlayerManager.new(config)
         locations = {}
     }
 
-
     -- initialize player state
     self.state = {
         health = { current = 0, max = 0, percent = 0 },
@@ -148,7 +139,6 @@ function PlayerManager.new(config)
         adrenaline = 0,
         location = "UNKNOWN",
         orientation = 999,
-        status = "Idle",
         coords = { x = 0, y = 0, z = 0 },
         animation = -1,
         moving = false,
@@ -204,10 +194,51 @@ function PlayerManager:_determineLocation()
     return "UNKNOWN"
 end
 
---determines the direction the prayer is facing
+--- Checks if the player is idle
+---@return boolean
+function PlayerManager:isPlayerIdle()
+    return self.state.animation == 0 and not self.state.moving
+end
+
+--- Checks if the player is in a certain area
+---@return boolean
+function PlayerManager:isPlayerAtLocation(coords)
+    return API.PInArea(coords.x, coords.range, coords.y, coords.range, self.state.coords.z)
+end
+
+--- Determines the direction the prayer is facing
 function PlayerManager:_determineOrientation()
     local orientation = math.floor(API.calculatePlayerOrientation()) % 360
     return orientation
+end
+
+--- Returns the cardinal direction the player is facing with 45° tolerance
+---@return string
+function PlayerManager:getFacingDirection()
+    local deg = self.state.orientation % 360  -- Normalize to 0-359
+    local directions = {
+        {min=338, max=22, name="North"},
+        {min=23, max=67, name="Northeast"},
+        {min=68, max=112, name="East"},
+        {min=113, max=157, name="Southeast"},
+        {min=158, max=202, name="South"},
+        {min=203, max=247, name="Southwest"},
+        {min=248, max=292, name="West"},
+        {min=293, max=337, name="Northwest"}
+    }
+
+    -- Special case for North (wraps around 0°)
+    if deg >= 338 or deg <= 22 then
+        return "North"
+    end
+
+    for _, dir in ipairs(directions) do
+        if deg >= dir.min and deg <= dir.max then
+            return dir.name
+        end
+    end
+
+    return "North" -- Fallback (should never reach here)
 end
 
 ---make stat
@@ -222,17 +253,37 @@ function PlayerManager:_createStat(current, max)
     }
 end
 
+--- Checks if the ability can be used from the Ability Bar
+---@param ability_name string
+---@return boolean
+function PlayerManager:_canUseAbility(ability_name)
+    return (#API.GetABs_names({ability_name}) > 0)
+    and API.GetABs_names({ability_name})[1].enabled
+    and (API.GetABs_names({ability_name})[1].cooldown_timer <= 1)
+end
+
+--- Uses ability from Ability Bar if it can be used.
+---@param ability_name string
+---@return boolean
+function PlayerManager:_useAbility(ability_name)
+    if PlayerManager:_canUseAbility(ability_name) then
+        return API.DoAction_Ability(ability_name, 1, API.OFF_ACT_GeneralInterface_route, true)
+    else return false end
+end
+
+--FIXME: add annotation and make sure its in managerprayer
+--- Teleports to War's Retreat
 function PlayerManager:_teleportToWars()
     local currentTick = API.Get_tick()
     if self.timestamp.tele - currentTick < 10 then
-        if API.DoAction_Ability("War's Retreat Teleport", 1, API.OFF_ACT_GeneralInterface_route, true) then
-            self.debugLog(string.format("Out of food items (%s | %s%%), teleporting out!", self.state.health.current, self.state.health.percent))
+        if self:_useAbility("War's Retreat Teleport") then
+            self.debugLog(string.format("Out of food or prayer items (%s | %s%%), teleporting out!", self.state.health.current, self.state.health.percent))
             self.timestamp.tele = currentTick
         end
     end
 end
 
----updates values in the PlayerState instance
+--- Updates values in the PlayerState instance
 ---@private
 function PlayerManager:_updatePlayerState()
     -- health
@@ -255,31 +306,6 @@ function PlayerManager:_updatePlayerState()
     self.state.moving = API.ReadPlayerMovin2() or false
     self.state.inCombat = API.GetInCombBit() or false
 end
-
-function PlayerManager:_handleStatuses()
-    local highestPriority = -math.huge
-    local oldstatus = self.state.status
-    local activeStatus = nil
-
-    for _, status in ipairs(self.config.statuses or {}) do
-        if status.condition(self) and (status.priority > highestPriority) then
-            highestPriority = status.priority
-            activeStatus = status
-        end
-    end
-
-    if activeStatus then
-        self.state.status = activeStatus.name
-        activeStatus.execute(self)
-    else
-        self.state.status = "Idle"
-    end
-
-    if activeStatus and oldstatus ~= activeStatus.name then
-        PlayerManager.debugLog("Status change detected: " .. oldstatus .. " -> " .. activeStatus.name)
-    end
-end
-
 --#endregion
 
 --#region player management methods
@@ -726,11 +752,9 @@ function PlayerManager:stateTracking()
         { "- Health",      self.state.health.current .. "/" .. self.state.health.max .. " (" .. self.state.health.percent .. "%)" },
         { "- Prayer",      self.state.prayer.current .. "/" .. self.state.prayer.max .. " (" .. self.state.prayer.percent .. "%)" },
         { "- Adrenaline",  self.state.adrenaline },
-        -- status
-        { "- Status",      self.state.status },
         -- location
         { "- Location",    self.state.location },
-        { "- Direction",   self.state.orientation },
+        { "- Direction",   self:getFacingDirection().. " ("..self.state.orientation .. "°)"},
         { "- Coordinates", string.format("(%s, %s, %s)",
             self.state.coords.x,
             self.state.coords.y,
@@ -814,7 +838,6 @@ function PlayerManager:activeBuffsTracking()
     end
     return metrics
 end
-
 --#endregion
 
 ---updates the player state
@@ -823,7 +846,6 @@ function PlayerManager:update()
     self.buffs.managed = {}
     self:_updatePlayerState()     -- refresh player data
     self:_scanInventoryCategory() -- get the inventory items
-    self:_handleStatuses()        -- handle statuses
 end
 
 return PlayerManager
